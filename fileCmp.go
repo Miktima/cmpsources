@@ -8,23 +8,54 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
-func getHash(filename string) (uint32, error) {
-	bs, err := os.ReadFile(filename)
-	if err != nil {
-		return 0, err
-	}
-	h := crc32.NewIEEE()
-	h.Write(bs)
-	return h.Sum32(), nil
+func getHash(filename, url string) (uint32, uint32, bool, error) {
+	var hFileSum32 chan uint32 = make(chan uint32)
+	var hURLSum32 chan uint32 = make(chan uint32)
+	go func() {
+		bs, err := os.ReadFile(filename)
+		if err != nil {
+			return
+		}
+		hFile := crc32.NewIEEE()
+		hFile.Write(bs)
+		hFileSum32 <- hFile.Sum32()
+	}()
+	h1 := <-hFileSum32
+	go func() {
+		resp, err := http.Get(url)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return
+		}
+		hUrl := crc32.NewIEEE()
+		hUrl.Write(body)
+		hURLSum32 <- hUrl.Sum32()
+	}()
+	h2 := <-hURLSum32
+	return h1, h2, h1 == h2, nil
 }
 
 func main() {
 	// initial values
-	urlPage := "https://sputnikglobe.com/20230703/sweden-belatedly-denounces-quran-burning-after-international-backlash-1111632481.html"
-	cdn := "cdn1.img.sputnikglobe.com"
-	initGitPath := "C:\\dev\\sputnik-white\\htdocs\\"
+	var urlPage string
+	var cdn string
+	var initGitPath string
+	fmt.Printf("Page URL to check css and js resources: ")
+	fmt.Scanln(&urlPage)
+	fmt.Printf("CDN on the page: ")
+	fmt.Scanln(&cdn)
+	fmt.Printf("PATH to htdocs of a project: ")
+	fmt.Scanln(&initGitPath)
+	// urlPage = "https://sputniknews.lat/20230706/la-policia-ucraniana-usa-la-fuerza-contra-los-fieles-del-monasterio-de-las-cuevas-de-kiev--videos--1141291678.html"
+	// cdn = "cdn(1|2).img.sputniknews.lat"
+	// initGitPath = "/home/vboxuser/dev/sputnik-white/htdocs/"
 	// Send an HTTP GET request to the urlPage web page
 	resp, err := http.Get(urlPage)
 	if err != nil {
@@ -44,56 +75,24 @@ func main() {
 	// loops through the links slice and find corresponded files in git
 	// Check if paths must be changed (for windows)
 	changePath := strings.Count(initGitPath, "\\")
+	startTime := time.Now()
 	for _, l := range links {
-		fmt.Println("link - ", l)
-		before, file, found := strings.Cut(l, "https://"+cdn+"/")
-		if !found {
-			fmt.Println("Error: pattern not found!")
-			// Just to avoid error
-			fmt.Println(before)
-		}
+		reFile := regexp.MustCompile(`https://` + cdn + `(/[\w/.:]*(css|js))`)
+		paths := reFile.FindStringSubmatch(l)
+		file := paths[len(paths)-2]
 		if changePath > 0 {
 			file = strings.ReplaceAll(file, "/", "\\")
 		}
-		fmt.Println("File: ", initGitPath+file)
-		h1, err := getHash(initGitPath + file)
+		h1, h2, ver, err := getHash(initGitPath+file, l)
 		if err != nil {
 			return
 		}
-		fmt.Println(initGitPath+file, h1)
-	}
-
-	// Find and print all links on the web page
-	/*	var links []string
-		var link func(*html.Node)
-		link = func(n *html.Node) {
-			if n.Type == html.ElementNode && n.Data == "a" {
-				for _, a := range n.Attr {
-					if a.Key == "href" {
-						// adds a new link entry when the attribute matches
-						links = append(links, a.Val)
-					}
-				}
-			}
-
-			// traverses the HTML of the webpage from the first child node
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				link(c)
-			}
+		switch ver {
+		case true:
+			fmt.Println(l, h1, h2, ver)
+		case false:
+			fmt.Println(l, h1, h2, ver, "!!!!!!!")
 		}
-		link(doc)
-
-		// loops through the links slice
-		for _, l := range links {
-			fmt.Println("Link:", l)
-		}*/
-	/*h1, err := getHash("test1.txt")
-	if err != nil {
-		return
 	}
-	h2, err := getHash("test2.txt")
-	if err != nil {
-		return
-	}
-	fmt.Println(h1, h2, h1 == h2)*/
+	fmt.Println("Elapsed time: ", time.Since(startTime))
 }
