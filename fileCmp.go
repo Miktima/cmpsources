@@ -9,16 +9,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 )
 
-type initPar struct {
-	URLPage     string
-	CDN         string
-	InitGitPath string
-}
-
-func getHash(filename, url string) (uint32, uint32, bool, error) {
+func getHash(filename, url string) {
 	var hFileSum32 chan uint32 = make(chan uint32)
 	var hURLSum32 chan uint32 = make(chan uint32)
 	go func() {
@@ -46,11 +39,22 @@ func getHash(filename, url string) (uint32, uint32, bool, error) {
 		hURLSum32 <- hUrl.Sum32()
 	}()
 	h2 := <-hURLSum32
-	return h1, h2, h1 == h2, nil
+	ver := h1 == h2
+	switch ver {
+	case true:
+		fmt.Println(filename, h1, h2, ver)
+	case false:
+		fmt.Println(filename, h1, h2, ver, "!!!!!!!")
+	}
 }
 
 func main() {
 	// initial values
+	type initPar struct {
+		URLPage     string
+		CDN         string
+		InitGitPath string
+	}
 	var readFile string
 	var ipar initPar
 	fmt.Printf("Read from configuration file (conf.json)? (Y/n)")
@@ -98,7 +102,6 @@ func main() {
 	// loops through the links slice and find corresponded files in git
 	// Check if paths must be changed (for windows)
 	changePath := strings.Count(ipar.InitGitPath, "\\")
-	startTime := time.Now()
 	for _, l := range links {
 		reFile := regexp.MustCompile(`https://` + ipar.CDN + `(/[\w/.:]*(css|js))`)
 		paths := reFile.FindStringSubmatch(l)
@@ -106,16 +109,8 @@ func main() {
 		if changePath > 0 {
 			file = strings.ReplaceAll(file, "/", "\\")
 		}
-		h1, h2, ver, err := getHash(ipar.InitGitPath+file, l)
-		if err != nil {
-			return
-		}
-		switch ver {
-		case true:
-			fmt.Println(l, h1, h2, ver)
-		case false:
-			fmt.Println(l, h1, h2, ver, "!!!!!!!")
-		}
+		go getHash(ipar.InitGitPath+file, l)
 	}
-	fmt.Println("Elapsed time: ", time.Since(startTime))
+	var input string
+	fmt.Scanln(&input)
 }
