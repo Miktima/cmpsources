@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -10,6 +11,12 @@ import (
 	"strings"
 	"time"
 )
+
+type initPar struct {
+	URLPage     string
+	CDN         string
+	InitGitPath string
+}
 
 func getHash(filename, url string) (uint32, uint32, bool, error) {
 	var hFileSum32 chan uint32 = make(chan uint32)
@@ -44,27 +51,43 @@ func getHash(filename, url string) (uint32, uint32, bool, error) {
 
 func main() {
 	// initial values
-	var urlPage string
-	var cdn string
-	var initGitPath string
-	fmt.Printf("Page URL to check css and js resources: ")
-	fmt.Scanln(&urlPage)
-	fmt.Printf("CDN on the page: ")
-	fmt.Scanln(&cdn)
-	fmt.Printf("PATH to htdocs of a project: ")
-	fmt.Scanln(&initGitPath)
-	// urlPage = "https://sputniknews.lat/20230706/la-policia-ucraniana-usa-la-fuerza-contra-los-fieles-del-monasterio-de-las-cuevas-de-kiev--videos--1141291678.html"
-	// cdn = "cdn(1|2).img.sputniknews.lat"
-	// initGitPath = "/home/vboxuser/dev/sputnik-white/htdocs/"
+	var readFile string
+	var ipar initPar
+	fmt.Printf("Read from configuration file (conf.json)? (Y/n)")
+	fmt.Scanln(&readFile)
+	if readFile == "n" || readFile == "N" {
+		fmt.Printf("Page URL to check css and js resources: ")
+		fmt.Scanln(&ipar.URLPage)
+		fmt.Printf("CDN on the page: ")
+		fmt.Scanln(&ipar.CDN)
+		fmt.Printf("PATH to htdocs of a project: ")
+		fmt.Scanln(&ipar.InitGitPath)
+	} else {
+		// Open our jsonFile
+		byteValue, err := os.ReadFile("conf.json")
+		// if we os.ReadFile returns an error then handle it
+		if err != nil {
+			fmt.Println(err)
+		}
+		// defer the closing of our jsonFile so that we can parse it later on
+		// var iparS []initPar
+		err = json.Unmarshal(byteValue, &ipar)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Println("Page URL to check css and js resources: ", ipar.URLPage)
+		fmt.Println("CDN on the page: ", ipar.CDN)
+		fmt.Println("PATH to htdocs of a project: ", ipar.InitGitPath)
+	}
 	// Send an HTTP GET request to the urlPage web page
-	resp, err := http.Get(urlPage)
+	resp, err := http.Get(ipar.URLPage)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 	defer resp.Body.Close()
 	// find all matched links
-	re := regexp.MustCompile(`(https://` + cdn + `[\w/.:]*(css|js))`)
+	re := regexp.MustCompile(`(https://` + ipar.CDN + `[\w/.:]*(css|js))`)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -74,16 +97,16 @@ func main() {
 	links := re.FindAllString(content, -1)
 	// loops through the links slice and find corresponded files in git
 	// Check if paths must be changed (for windows)
-	changePath := strings.Count(initGitPath, "\\")
+	changePath := strings.Count(ipar.InitGitPath, "\\")
 	startTime := time.Now()
 	for _, l := range links {
-		reFile := regexp.MustCompile(`https://` + cdn + `(/[\w/.:]*(css|js))`)
+		reFile := regexp.MustCompile(`https://` + ipar.CDN + `(/[\w/.:]*(css|js))`)
 		paths := reFile.FindStringSubmatch(l)
 		file := paths[len(paths)-2]
 		if changePath > 0 {
 			file = strings.ReplaceAll(file, "/", "\\")
 		}
-		h1, h2, ver, err := getHash(initGitPath+file, l)
+		h1, h2, ver, err := getHash(ipar.InitGitPath+file, l)
 		if err != nil {
 			return
 		}
